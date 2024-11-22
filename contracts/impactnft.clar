@@ -1,11 +1,13 @@
 ;; ImpactNFT Smart Contract
-;; Transparent Blockchain Charity Platform with Robust Input Validation
+;; Transparent Blockchain Charity Platform with Recurring Donations
 
 (define-constant contract-owner tx-sender)
 (define-constant err-owner-only (err u100))
 (define-constant err-insufficient-funds (err u101))
 (define-constant err-invalid-nft (err u102))
 (define-constant err-invalid-input (err u103))
+(define-constant err-recurring-donation-exists (err u104))
+(define-constant err-recurring-donation-not-found (err u105))
 
 ;; Input Validation Functions
 (define-private (validate-string (input (string-utf8 500))) 
@@ -61,6 +63,20 @@
 (define-map donor-contributions 
   { project-id: uint, donor: principal }
   { amount: uint, timestamp: uint }
+)
+
+;; Recurring Donation Structure
+(define-map recurring-donations 
+  { 
+    donor: principal, 
+    project-id: uint 
+  }
+  {
+    amount: uint,
+    frequency-blocks: uint,
+    last-donation-block: uint,
+    is-active: bool
+  }
 )
 
 ;; Create a new charity project with strict input validation
@@ -119,6 +135,105 @@
     
     ;; Mint Impact NFT to donor
     (nft-mint? impact-nft project-id tx-sender)
+  )
+)
+
+;; Setup Recurring Donation
+(define-public (setup-recurring-donation
+  (project-id uint)
+  (amount uint)
+  (frequency-blocks uint)
+)
+  (let 
+    (
+      (project (unwrap! (get-validated-project project-id) err-invalid-nft))
+      (existing-donation (map-get? recurring-donations { donor: tx-sender, project-id: project-id }))
+    )
+    ;; Validate inputs
+    (asserts! (validate-amount amount) err-invalid-input)
+    (asserts! (> frequency-blocks u0) err-invalid-input)
+    (asserts! (get is-active project) err-invalid-nft)
+    
+    ;; Check if recurring donation already exists
+    (asserts! (is-none existing-donation) err-recurring-donation-exists)
+    
+    ;; Store recurring donation details
+    (map-set recurring-donations 
+      { donor: tx-sender, project-id: project-id }
+      {
+        amount: amount,
+        frequency-blocks: frequency-blocks,
+        last-donation-block: block-height,
+        is-active: true
+      }
+    )
+    
+    (ok true)
+  )
+)
+
+;; Process Recurring Donations
+(define-public (process-recurring-donations 
+  (donor principal)
+  (project-id uint)
+)
+  (let 
+    (
+      (recurring-donation (unwrap! 
+        (map-get? recurring-donations { donor: donor, project-id: project-id }) 
+        err-recurring-donation-not-found
+      ))
+      (project (unwrap! 
+        (get-validated-project project-id) 
+        err-invalid-nft
+      ))
+      (amount (get amount recurring-donation))
+      (frequency-blocks (get frequency-blocks recurring-donation))
+      (last-donation-block (get last-donation-block recurring-donation))
+    )
+    ;; Check if donation is due
+    (asserts! (>= (- block-height last-donation-block) frequency-blocks) err-invalid-input)
+    (asserts! (get is-active project) err-invalid-nft)
+    
+    ;; Transfer funds
+    (try! (stx-transfer? amount donor (as-contract tx-sender)))
+    
+    ;; Update project and recurring donation details
+    (map-set charity-projects 
+      { project-id: project-id }
+      (merge project { 
+        current-amount: (+ (get current-amount project) amount) 
+      })
+    )
+    (map-set recurring-donations 
+      { donor: donor, project-id: project-id }
+      (merge recurring-donation { 
+        last-donation-block: block-height 
+      })
+    )
+    
+    ;; Mint Impact NFT for recurring donation
+    (nft-mint? impact-nft project-id donor)
+  )
+)
+
+;; Cancel Recurring Donation
+(define-public (cancel-recurring-donation 
+  (project-id uint)
+)
+  (let 
+    (
+      (recurring-donation (unwrap! 
+        (map-get? recurring-donations { donor: tx-sender, project-id: project-id }) 
+        err-recurring-donation-not-found
+      ))
+    )
+    ;; Remove recurring donation
+    (map-delete recurring-donations 
+      { donor: tx-sender, project-id: project-id }
+    )
+    
+    (ok true)
   )
 )
 
