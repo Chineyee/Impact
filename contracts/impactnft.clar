@@ -1,10 +1,23 @@
 ;; ImpactNFT Smart Contract
-;; Transparent Blockchain Charity Platform
+;; Transparent Blockchain Charity Platform with Input Validation
 
 (define-constant contract-owner tx-sender)
 (define-constant err-owner-only (err u100))
 (define-constant err-insufficient-funds (err u101))
 (define-constant err-invalid-nft (err u102))
+(define-constant err-invalid-input (err u103))
+
+;; Input Validation Functions
+(define-private (validate-string (input (string-utf8 500))) 
+  (and 
+    (> (len input) u0) 
+    (<= (len input) u500)
+  )
+)
+
+(define-private (validate-amount (amount uint))
+  (> amount u0)
+)
 
 ;; NFT for Charity Donations
 (define-non-fungible-token impact-nft uint)
@@ -27,14 +40,20 @@
   { amount: uint, timestamp: uint }
 )
 
-;; Create a new charity project
+;; Create a new charity project with strict input validation
 (define-public (create-charity-project 
   (name (string-utf8 100))
   (description (string-utf8 500))
   (target-amount uint)
 )
   (begin
+    ;; Validate inputs
     (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (validate-string name) err-invalid-input)
+    (asserts! (validate-string description) err-invalid-input)
+    (asserts! (validate-amount target-amount) err-invalid-input)
+
+    ;; Create project with validated inputs
     (map-set charity-projects 
       { project-id: (var-get next-project-id) }
       {
@@ -50,7 +69,7 @@
   )
 )
 
-;; Donate to a specific charity project
+;; Donate to a specific charity project with input validation
 (define-public (donate 
   (project-id uint)
   (amount uint)
@@ -60,6 +79,8 @@
       (project (unwrap! (map-get? charity-projects { project-id: project-id }) err-invalid-nft))
       (current-amount (get current-amount project))
     )
+    ;; Additional input validations
+    (asserts! (validate-amount amount) err-invalid-input)
     (asserts! (get is-active project) err-invalid-nft)
     (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
     
@@ -87,6 +108,7 @@
       (project (unwrap! (map-get? charity-projects { project-id: project-id }) err-invalid-nft))
       (current-amount (get current-amount project))
     )
+    ;; Strict validation for withdrawal
     (asserts! (is-eq tx-sender contract-owner) err-owner-only)
     (asserts! (>= current-amount (get target-amount project)) err-insufficient-funds)
     
