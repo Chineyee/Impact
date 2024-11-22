@@ -1,5 +1,5 @@
 ;; ImpactNFT Smart Contract
-;; Transparent Blockchain Charity Platform with Input Validation
+;; Transparent Blockchain Charity Platform with Robust Input Validation
 
 (define-constant contract-owner tx-sender)
 (define-constant err-owner-only (err u100))
@@ -17,6 +17,29 @@
 
 (define-private (validate-amount (amount uint))
   (> amount u0)
+)
+
+;; Strict project ID validation function
+(define-private (is-valid-project-id (project-id uint))
+  (and 
+    (>= project-id u0) 
+    (< project-id (var-get next-project-id))
+  )
+)
+
+;; Safe project ID retrieval
+(define-private (get-validated-project 
+  (project-id uint)
+)
+  (let 
+    (
+      (is-valid (is-valid-project-id project-id))
+      (project (map-get? charity-projects { project-id: project-id }))
+    )
+    (if is-valid
+      project
+      none)
+  )
 )
 
 ;; NFT for Charity Donations
@@ -76,7 +99,7 @@
 )
   (let 
     (
-      (project (unwrap! (map-get? charity-projects { project-id: project-id }) err-invalid-nft))
+      (project (unwrap! (get-validated-project project-id) err-invalid-input))
       (current-amount (get current-amount project))
     )
     ;; Additional input validations
@@ -105,7 +128,7 @@
 )
   (let 
     (
-      (project (unwrap! (map-get? charity-projects { project-id: project-id }) err-invalid-nft))
+      (project (unwrap! (get-validated-project project-id) err-invalid-input))
       (current-amount (get current-amount project))
     )
     ;; Strict validation for withdrawal
@@ -125,7 +148,7 @@
 
 ;; Get project details
 (define-read-only (get-project-details (project-id uint))
-  (map-get? charity-projects { project-id: project-id })
+  (get-validated-project project-id)
 )
 
 ;; Global variables
